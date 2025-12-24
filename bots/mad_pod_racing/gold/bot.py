@@ -229,12 +229,47 @@ def boost_ok(
     return sp < 1350.0
 
 
+def choose_racer_idx(
+    p1: Pod,
+    p2: Pod,
+    st1: Prog,
+    st2: Prog,
+    cps: list[tuple[int, int]],
+    prev_idx: int,
+) -> int:
+    # Primary: who has passed more checkpoints in total.
+    if st1.passed != st2.passed:
+        return 0 if st1.passed > st2.passed else 1
+
+    # Secondary: who is closer to next checkpoint.
+    c1x, c1y = cps[p1.ncp]
+    c2x, c2y = cps[p2.ncp]
+    d1 = math.sqrt(dist2(p1.x, p1.y, c1x, c1y))
+    d2 = math.sqrt(dist2(p2.x, p2.y, c2x, c2y))
+
+    # Tertiary: speed.
+    s1 = length(p1.vx, p1.vy)
+    s2 = length(p2.vx, p2.vy)
+
+    # Hysteresis to stop role thrash (kills opening acceleration).
+    # If they're basically tied, keep the previous racer.
+    if abs(d1 - d2) < 450.0 and abs(s1 - s2) < 250.0:
+        return prev_idx
+
+    # Otherwise pick the pod that is effectively "ahead".
+    score1 = d1 - s1 * 5.5
+    score2 = d2 - s2 * 5.5
+    return 0 if score1 <= score2 else 1
+
+
 def main() -> None:
     _laps = int(input())
     cp_count = int(input())
     cps = [tuple(map(int, input().split())) for _ in range(cp_count)]
 
     boost_used = False
+    turn = 0
+    prev_racer_idx = 0
 
     my_prog = [Prog(), Prog()]
     op_prog = [Prog(), Prog()]
@@ -253,12 +288,9 @@ def main() -> None:
         update_progress(op_prog[0], o1, cp_count)
         update_progress(op_prog[1], o2, cp_count)
 
-        if progress_key(p1, my_prog[0], cps) >= progress_key(p2, my_prog[1], cps):
-            racer, blocker = p1, p2
-            racer_idx = 0
-        else:
-            racer, blocker = p2, p1
-            racer_idx = 1
+        racer_idx = choose_racer_idx(p1, p2, my_prog[0], my_prog[1], cps, prev_racer_idx)
+        prev_racer_idx = racer_idx
+        racer, blocker = (p1, p2) if racer_idx == 0 else (p2, p1)
 
         if progress_key(o1, op_prog[0], cps) >= progress_key(o2, op_prog[1], cps):
             enemy_leader = o1
@@ -272,7 +304,11 @@ def main() -> None:
         if should_shield(racer, o1, o2) and rdist < 3500:
             rcmd = "SHIELD"
         else:
-            if (not boost_used) and boost_ok(racer, cps, cp_count, rdist, rdiff):
+            # First turn has no 18° rotation limit: if it's a clean long straight, just BOOST.
+            if (not boost_used) and turn == 0 and rdiff < 2.5 and rdist > 6000:
+                rcmd = "BOOST"
+                boost_used = True
+            elif (not boost_used) and boost_ok(racer, cps, cp_count, rdist, rdiff):
                 rcmd = "BOOST"
                 boost_used = True
             else:
@@ -298,6 +334,7 @@ def main() -> None:
         else:
             print(bline)
             print(rline)
+        turn += 1
 
 
 if __name__ == "__main__":

@@ -98,6 +98,25 @@ def projected_target_for_checkpoint(
     dist = math.sqrt(d2)
     speed = length(pod.vx, pod.vy)
 
+    # Turn-in / inside apex point.
+    # Choose a point offset around the checkpoint on the inside of the entry->exit turn.
+    ax = cx - pod.x
+    ay = cy - pod.y
+    al = math.hypot(ax, ay)
+    if al < 1.0:
+        axu, ayu = 0.0, 0.0
+    else:
+        axu, ayu = ax / al, ay / al
+    dot = clamp(axu * ux + ayu * uy, -1.0, 1.0)
+    turn_rad = math.acos(dot)  # 0 = straight, pi = u-turn
+    turn_factor = turn_rad / math.pi
+    # left normal of exit direction
+    lpx, lpy = -uy, ux
+    cross = axu * uy - ayu * ux
+    side = 1.0 if cross > 0.0 else -1.0
+    apex_offset = clamp((220.0 + speed * 0.18) * turn_factor, 0.0, 650.0)
+    apex_pt = (cx + lpx * side * apex_offset, cy + lpy * side * apex_offset)
+
     look = 450.0
     if dist > 6500:
         look = 1100.0
@@ -254,7 +273,7 @@ def racer_candidates(pod: Pod, cps: list[tuple[int, int]], cp_count: int) -> tup
     aim2 = compensated(cx, cy, 0.35)
 
     # Keep candidate set small for speed.
-    cands = [(cx, cy), (bx, by), aim1, aim2, (tx, ty)]
+    cands = [(cx, cy), apex_pt, (bx, by), aim1, aim2, (tx, ty)]
     return cands, dist, speed
 
 
@@ -269,6 +288,7 @@ def pick_racer_action(
     cands, dist, speed = racer_candidates(pod, cps, cp_count)
     cx, cy = cps[pod.ncp]
     nx, ny = cps[(pod.ncp + 1) % cp_count]
+    nnx, nny = cps[(pod.ncp + 2) % cp_count]
 
     segx = nx - cx
     segy = ny - cy
@@ -277,6 +297,14 @@ def pick_racer_action(
         ux, uy = 0.0, 0.0
     else:
         ux, uy = segx / seglen, segy / seglen
+
+    seg2x = nnx - nx
+    seg2y = nny - ny
+    seg2len = math.hypot(seg2x, seg2y)
+    if seg2len < 1.0:
+        u2x, u2y = ux, uy
+    else:
+        u2x, u2y = seg2x / seg2len, seg2y / seg2len
 
     first_turn = turn == 0
 
@@ -312,13 +340,18 @@ def pick_racer_action(
                 650.0,
                 first_turn=first_turn,
             )
-            d2 = math.sqrt(dist2(x2, y2, cx, cy))
-            sp2 = math.hypot(vx2, vy2)
-            aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
-            exit_v = vx2 * ux + vy2 * uy
-            score = d2 + aerr * 6.0 - sp2 * 0.04 - exit_v * exit_weight
-            if d2 < 600.0:
-                score -= 2500.0
+            d2_sq = dist2(x2, y2, cx, cy)
+            passed = d2_sq <= 600.0 * 600.0
+            if passed:
+                d_eval = math.sqrt(dist2(x2, y2, nx, ny))
+                aerr = abs(angle_diff(angle_to(x2, y2, nx, ny), ang2))
+                exit_v = vx2 * u2x + vy2 * u2y
+                score = d_eval + aerr * 5.8 - math.hypot(vx2, vy2) * 0.04 - exit_v * (exit_weight * 1.25)
+            else:
+                d_eval = math.sqrt(d2_sq)
+                aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
+                exit_v = vx2 * ux + vy2 * uy
+                score = d_eval + aerr * 6.0 - math.hypot(vx2, vy2) * 0.04 - exit_v * exit_weight
             if score < best_score:
                 best_score = score
                 best_tx, best_ty = tx, ty
@@ -337,14 +370,19 @@ def pick_racer_action(
                 thrust,
                 first_turn=first_turn,
             )
-            d2 = math.sqrt(dist2(x2, y2, cx, cy))
+            d2_sq = dist2(x2, y2, cx, cy)
+            passed = d2_sq <= 600.0 * 600.0
             sp2 = math.hypot(vx2, vy2)
-            aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
-            exit_v = vx2 * ux + vy2 * uy
-
-            score = d2 + aerr * 5.2 - sp2 * 0.04 - exit_v * exit_weight
-            if d2 < 600.0:
-                score -= 2500.0
+            if passed:
+                d_eval = math.sqrt(dist2(x2, y2, nx, ny))
+                aerr = abs(angle_diff(angle_to(x2, y2, nx, ny), ang2))
+                exit_v = vx2 * u2x + vy2 * u2y
+                score = d_eval + aerr * 4.8 - sp2 * 0.04 - exit_v * (exit_weight * 1.25)
+            else:
+                d_eval = math.sqrt(d2_sq)
+                aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
+                exit_v = vx2 * ux + vy2 * uy
+                score = d_eval + aerr * 5.2 - sp2 * 0.04 - exit_v * exit_weight
             # Strongly discourage low thrust far from checkpoint.
             if dist > 3500 and thrust < 65.0:
                 score += 2500.0

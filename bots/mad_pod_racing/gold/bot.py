@@ -268,6 +268,15 @@ def pick_racer_action(
 ) -> tuple[float, float, str, bool, float]:
     cands, dist, speed = racer_candidates(pod, cps, cp_count)
     cx, cy = cps[pod.ncp]
+    nx, ny = cps[(pod.ncp + 1) % cp_count]
+
+    segx = nx - cx
+    segy = ny - cy
+    seglen = math.hypot(segx, segy)
+    if seglen < 1.0:
+        ux, uy = 0.0, 0.0
+    else:
+        ux, uy = segx / seglen, segy / seglen
 
     first_turn = turn == 0
 
@@ -287,6 +296,9 @@ def pick_racer_action(
         desired = angle_to(pod.x, pod.y, tx, ty)
         diff = abs(angle_diff(desired, pod.ang))
 
+        # Exit-speed matters in Gold: reward velocity along the checkpoint->next segment.
+        exit_weight = 0.18 if dist < 5000 else 0.10
+
         # Consider BOOST as a candidate action.
         if (not boost_used) and diff < (2.8 if first_turn else 2.2) and dist > 6000:
             x2, y2, vx2, vy2, ang2 = simulate_step(
@@ -303,7 +315,8 @@ def pick_racer_action(
             d2 = math.sqrt(dist2(x2, y2, cx, cy))
             sp2 = math.hypot(vx2, vy2)
             aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
-            score = d2 + aerr * 6.0 - sp2 * 0.06
+            exit_v = vx2 * ux + vy2 * uy
+            score = d2 + aerr * 6.0 - sp2 * 0.04 - exit_v * exit_weight
             if d2 < 600.0:
                 score -= 2500.0
             if score < best_score:
@@ -327,8 +340,9 @@ def pick_racer_action(
             d2 = math.sqrt(dist2(x2, y2, cx, cy))
             sp2 = math.hypot(vx2, vy2)
             aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
+            exit_v = vx2 * ux + vy2 * uy
 
-            score = d2 + aerr * 6.0 - sp2 * 0.06
+            score = d2 + aerr * 5.2 - sp2 * 0.04 - exit_v * exit_weight
             if d2 < 600.0:
                 score -= 2500.0
             # Strongly discourage low thrust far from checkpoint.
@@ -395,6 +409,15 @@ def blocker_intercept_target(blocker: Pod, enemy: Pod, cps: list[tuple[int, int]
     evx, evy = enemy.vx, enemy.vy
 
     d = math.sqrt(dist2(blocker.x, blocker.y, ex, ey))
+
+    # If we're in reasonable range, prioritize a direct bump: aim at where they'll be next turn.
+    if d < 4200:
+        tx = ex + evx * 1.0
+        ty = ey + evy * 1.0
+        tx -= blocker.vx * 0.15
+        ty -= blocker.vy * 0.15
+        return tx, ty
+
     t = clamp(d / bs, 1.0, 6.0)
 
     fx = ex + evx * t

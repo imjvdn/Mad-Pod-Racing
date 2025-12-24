@@ -146,10 +146,12 @@ def thrust_for_angle_and_dist(diff: float, dist: float, speed: float) -> int:
     t = 100
 
     # Avoid "0-thrust spiral" when our target ends up behind us.
+    # NOTE: "0" is almost always wrong when you're far away; it kills repositioning.
+    # Only allow hard 0 when you're close and massively misaligned.
     if diff > 140:
-        t = 0
+        t = 0 if dist < 900 else 20
     elif diff > 95:
-        t = 15 if dist > 1800 else 0
+        t = 15 if dist > 900 else 0
     elif diff > 70:
         t = 35
     elif diff > 45:
@@ -274,7 +276,13 @@ def pick_racer_action(
     best_cmd = "100"
     used_boost = False
 
-    thrusts = (0.0, 35.0, 65.0, 85.0, 100.0)
+    # Don't consider "0 thrust" unless we're already very close (otherwise we lose huge time).
+    if dist < 1200:
+        thrusts = (0.0, 35.0, 65.0, 85.0, 100.0)
+    elif dist < 3500:
+        thrusts = (35.0, 65.0, 85.0, 100.0)
+    else:
+        thrusts = (65.0, 85.0, 100.0)
     for tx, ty in cands:
         desired = angle_to(pod.x, pod.y, tx, ty)
         diff = abs(angle_diff(desired, pod.ang))
@@ -323,6 +331,11 @@ def pick_racer_action(
             score = d2 + aerr * 6.0 - sp2 * 0.06
             if d2 < 600.0:
                 score -= 2500.0
+            # Strongly discourage low thrust far from checkpoint.
+            if dist > 3500 and thrust < 65.0:
+                score += 2500.0
+            elif dist > 2000 and thrust < 35.0:
+                score += 2500.0
 
             if score < best_score:
                 best_score = score
@@ -331,6 +344,17 @@ def pick_racer_action(
                 used_boost = False
 
     return best_tx, best_ty, best_cmd, used_boost, dist
+
+
+def blocker_thrust(diff: float, dist: float) -> int:
+    # Blocker should basically never stop. It needs momentum to get to collision points.
+    if dist < 700 and diff > 150:
+        return 0
+    if diff > 150:
+        return 40
+    if diff > 110:
+        return 70
+    return 100
 
 
 def imminent_collision(p: Pod, e: Pod) -> tuple[bool, float]:
@@ -487,8 +511,7 @@ def main() -> None:
         btx, bty = blocker_intercept_target(blocker, enemy_leader, cps)
         bdist = math.sqrt(dist2(blocker.x, blocker.y, btx, bty))
         bdiff = abs(angle_diff(angle_to(blocker.x, blocker.y, btx, bty), blocker.ang))
-        bs = length(blocker.vx, blocker.vy)
-        bthrust = thrust_for_angle_and_dist(bdiff, bdist, bs)
+        bthrust = blocker_thrust(bdiff, bdist)
 
         if should_shield(blocker, o1, o2):
             bcmd = "SHIELD"

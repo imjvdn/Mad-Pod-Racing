@@ -123,8 +123,18 @@ def projected_target_for_checkpoint(
     elif dist > 2500:
         corr = 0.55
 
-    aimx = bx - pod.vx * corr
-    aimy = by - pod.vy * corr
+    # Velocity compensation: clamp so we don't aim *behind* ourselves and stall (diff>95 -> thrust 0).
+    sx = pod.vx * corr
+    sy = pod.vy * corr
+    sl = math.hypot(sx, sy)
+    max_shift = max(300.0, dist * 0.55)
+    if sl > max_shift:
+        k = max_shift / sl
+        sx *= k
+        sy *= k
+
+    aimx = bx - sx
+    aimy = by - sy
 
     desired = angle_to(pod.x, pod.y, aimx, aimy)
     diff = abs(angle_diff(desired, pod.ang))
@@ -135,8 +145,11 @@ def projected_target_for_checkpoint(
 def thrust_for_angle_and_dist(diff: float, dist: float, speed: float) -> int:
     t = 100
 
-    if diff > 95:
+    # Avoid "0-thrust spiral" when our target ends up behind us.
+    if diff > 140:
         t = 0
+    elif diff > 95:
+        t = 15 if dist > 1800 else 0
     elif diff > 70:
         t = 35
     elif diff > 45:
@@ -152,6 +165,172 @@ def thrust_for_angle_and_dist(diff: float, dist: float, speed: float) -> int:
         t = min(t, 70)
 
     return int(t)
+
+
+def simulate_step(
+    x: float,
+    y: float,
+    vx: float,
+    vy: float,
+    ang: float,
+    tx: float,
+    ty: float,
+    thrust: float,
+    *,
+    first_turn: bool,
+) -> tuple[float, float, float, float, float]:
+    desired = angle_to(x, y, tx, ty)
+    d = angle_diff(desired, ang)
+    if not first_turn:
+        d = clamp(d, -18.0, 18.0)
+    ang2 = (ang + d) % 360.0
+
+    rad = math.radians(ang2)
+    vx2 = vx + math.cos(rad) * thrust
+    vy2 = vy + math.sin(rad) * thrust
+
+    x2 = x + vx2
+    y2 = y + vy2
+
+    vx2 *= 0.85
+    vy2 *= 0.85
+
+    vx2 = float(math.trunc(vx2))
+    vy2 = float(math.trunc(vy2))
+    x2 = float(int(round(x2)))
+    y2 = float(int(round(y2)))
+
+    return x2, y2, vx2, vy2, ang2
+
+
+def racer_candidates(pod: Pod, cps: list[tuple[int, int]], cp_count: int) -> tuple[list[tuple[float, float]], float, float]:
+    cx, cy = cps[pod.ncp]
+    nx, ny = cps[(pod.ncp + 1) % cp_count]
+
+    segx = nx - cx
+    segy = ny - cy
+    seglen = math.hypot(segx, segy)
+    if seglen < 1.0:
+        ux, uy = 0.0, 0.0
+    else:
+        ux, uy = segx / seglen, segy / seglen
+
+    dist = math.sqrt(dist2(pod.x, pod.y, cx, cy))
+    speed = length(pod.vx, pod.vy)
+
+    look = 450.0
+    if dist > 6500:
+        look = 1100.0
+    elif speed > 900.0:
+        look = 900.0
+    elif speed > 650.0:
+        look = 700.0
+
+    # "Exit" point and blended apex point.
+    tx = cx + ux * look
+    ty = cy + uy * look
+    if dist < 5000:
+        apex = clamp((dist - 900.0) / 3000.0, 0.10, 0.70)
+        bx = tx * apex + cx * (1.0 - apex)
+        by = ty * apex + cy * (1.0 - apex)
+    else:
+        bx, by = cx, cy
+
+    # Two levels of velocity compensation (clamped).
+    def compensated(px: float, py: float, k: float) -> tuple[float, float]:
+        sx = pod.vx * k
+        sy = pod.vy * k
+        sl = math.hypot(sx, sy)
+        max_shift = max(250.0, dist * 0.50)
+        if sl > max_shift:
+            kk = max_shift / sl
+            sx *= kk
+            sy *= kk
+        return px - sx, py - sy
+
+    aim1 = compensated(bx, by, 0.55 if dist > 2500 else 0.40)
+    aim2 = compensated(cx, cy, 0.35)
+
+    # Keep candidate set small for speed.
+    cands = [(cx, cy), (bx, by), aim1, aim2, (tx, ty)]
+    return cands, dist, speed
+
+
+def pick_racer_action(
+    pod: Pod,
+    cps: list[tuple[int, int]],
+    cp_count: int,
+    *,
+    turn: int,
+    boost_used: bool,
+) -> tuple[float, float, str, bool, float]:
+    cands, dist, speed = racer_candidates(pod, cps, cp_count)
+    cx, cy = cps[pod.ncp]
+
+    first_turn = turn == 0
+
+    best_score = 10**18
+    best_tx, best_ty = cx, cy
+    best_cmd = "100"
+    used_boost = False
+
+    thrusts = (0.0, 35.0, 65.0, 85.0, 100.0)
+    for tx, ty in cands:
+        desired = angle_to(pod.x, pod.y, tx, ty)
+        diff = abs(angle_diff(desired, pod.ang))
+
+        # Consider BOOST as a candidate action.
+        if (not boost_used) and diff < (2.8 if first_turn else 2.2) and dist > 6000:
+            x2, y2, vx2, vy2, ang2 = simulate_step(
+                float(pod.x),
+                float(pod.y),
+                float(pod.vx),
+                float(pod.vy),
+                float(pod.ang),
+                tx,
+                ty,
+                650.0,
+                first_turn=first_turn,
+            )
+            d2 = math.sqrt(dist2(x2, y2, cx, cy))
+            sp2 = math.hypot(vx2, vy2)
+            aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
+            score = d2 + aerr * 6.0 - sp2 * 0.06
+            if d2 < 600.0:
+                score -= 2500.0
+            if score < best_score:
+                best_score = score
+                best_tx, best_ty = tx, ty
+                best_cmd = "BOOST"
+                used_boost = True
+
+        for thrust in thrusts:
+            x2, y2, vx2, vy2, ang2 = simulate_step(
+                float(pod.x),
+                float(pod.y),
+                float(pod.vx),
+                float(pod.vy),
+                float(pod.ang),
+                tx,
+                ty,
+                thrust,
+                first_turn=first_turn,
+            )
+            d2 = math.sqrt(dist2(x2, y2, cx, cy))
+            sp2 = math.hypot(vx2, vy2)
+            aerr = abs(angle_diff(angle_to(x2, y2, cx, cy), ang2))
+
+            score = d2 + aerr * 6.0 - sp2 * 0.06
+            if d2 < 600.0:
+                score -= 2500.0
+
+            if score < best_score:
+                best_score = score
+                best_tx, best_ty = tx, ty
+                best_cmd = str(int(thrust))
+                used_boost = False
+
+    return best_tx, best_ty, best_cmd, used_boost, dist
 
 
 def imminent_collision(p: Pod, e: Pod) -> tuple[bool, float]:
@@ -297,22 +476,13 @@ def main() -> None:
         else:
             enemy_leader = o2
 
-        rtx, rty, rdist, rdiff = projected_target_for_checkpoint(racer, cps, cp_count)
-        rs = length(racer.vx, racer.vy)
-        rthrust = thrust_for_angle_and_dist(rdiff, rdist, rs)
-
+        rtx, rty, rcmd, picked_boost, rdist = pick_racer_action(
+            racer, cps, cp_count, turn=turn, boost_used=boost_used
+        )
         if should_shield(racer, o1, o2) and rdist < 3500:
             rcmd = "SHIELD"
-        else:
-            # First turn has no 18° rotation limit: if it's a clean long straight, just BOOST.
-            if (not boost_used) and turn == 0 and rdiff < 2.5 and rdist > 6000:
-                rcmd = "BOOST"
-                boost_used = True
-            elif (not boost_used) and boost_ok(racer, cps, cp_count, rdist, rdiff):
-                rcmd = "BOOST"
-                boost_used = True
-            else:
-                rcmd = str(rthrust)
+        elif picked_boost:
+            boost_used = True
 
         btx, bty = blocker_intercept_target(blocker, enemy_leader, cps)
         bdist = math.sqrt(dist2(blocker.x, blocker.y, btx, bty))

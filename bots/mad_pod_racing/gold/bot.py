@@ -239,6 +239,25 @@ def racer_candidates(pod: Pod, cps: list[tuple[int, int]], cp_count: int) -> tup
     dist = math.sqrt(dist2(pod.x, pod.y, cx, cy))
     speed = length(pod.vx, pod.vy)
 
+    # Inside-apex point (turn-in). Always defined; defaults to checkpoint center on degenerate cases.
+    apex_pt = (float(cx), float(cy))
+    ax = cx - pod.x
+    ay = cy - pod.y
+    al = math.hypot(ax, ay)
+    if al >= 1.0 and seglen >= 1.0:
+        axu, ayu = ax / al, ay / al
+        dot = clamp(axu * ux + ayu * uy, -1.0, 1.0)
+        turn_rad = math.acos(dot)  # 0=straight, pi=u-turn
+        turn_factor = turn_rad / math.pi
+
+        # Left normal of exit direction
+        lpx, lpy = -uy, ux
+        cross = axu * uy - ayu * ux
+        side = 1.0 if cross > 0.0 else -1.0
+
+        apex_offset = clamp((220.0 + speed * 0.18) * turn_factor, 0.0, 650.0)
+        apex_pt = (cx + lpx * side * apex_offset, cy + lpy * side * apex_offset)
+
     look = 450.0
     if dist > 6500:
         look = 1100.0

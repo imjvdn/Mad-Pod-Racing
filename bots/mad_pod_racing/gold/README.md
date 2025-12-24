@@ -1,13 +1,23 @@
-# Mad Pod Racing — Gold
+# Mad Pod Racing — Gold League
 
 ## Submission
 
-- Paste `bot.py` into CodinGame (Python 3).
+- CodinGame language: **Python 3**
+- Copy/paste: `bot.py`
+- Optional (stdout):
 
-## Intent
+```bash
+python3 tools/pack.py bots/mad_pod_racing/gold/bot.py
+```
 
-- Stable racer/blocker roles (track checkpoint progress per pod).
-- Racer: checkpoint exit bias + velocity compensation.
-- Blocker: intercept enemy leader near their line to next checkpoint.
+## Behavior summary
+
+- **Racer**
+  - Picks the lead pod using checkpoint progress + tie-break hysteresis (prevents role thrash).
+  - Uses a small 1-step forward simulation to choose `(target, thrust/BOOST)` each turn.
+  - Avoids “0-thrust stall” cases by clamping velocity compensation and limiting full braking.
+- **Blocker**
+  - Aims to intercept the opponent leader with a lead-time target biased toward their next checkpoint.
+  - Uses SHIELD only on imminent, high-relative-speed collisions.
 
 

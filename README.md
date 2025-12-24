@@ -1,16 +1,31 @@
-# CodinGame bots
+# CodinGame Bots
 
-Repository of CodinGame puzzle / contest bots.
+Paste-ready CodinGame bots (primarily contest AIs). Every bot is kept **single-file** so it can be copied directly into the CodinGame editor.
 
-## Layout
+## Repo conventions
 
-- `bots/<game>/<league>/bot.py`: single-file CodinGame submission (no local imports).
-- `bots/<game>/README.md`: index for that game (lists leagues/variants).
-- `bots/<game>/<league>/README.md`: strategy notes + how to submit/run.
-- `tools/pack.py`: optional “pack to stdout” helper (useful when you *do* add local modules later).
+- **Submission files**: `bot.py` is always import-free beyond stdlib.
+- **League separation**: variants live under `bots/<game>/<league>/`.
+- **Notes live next to the bot**: each league folder has its own `README.md`.
+
+## Structure
+
+- `bots/<game>/README.md`: game index + league inventory.
+- `bots/<game>/<league>/bot.py`: CodinGame submission (single-file).
+- `bots/<game>/<league>/README.md`: league-specific notes.
+- `tools/pack.py`: prints a single-file bot to stdout (useful for copy/paste workflows).
+
+## Usage
+
+- **Copy into CodinGame**: open `bots/<game>/<league>/bot.py`, paste into the CodinGame IDE.
+- **Print to stdout**:
+
+```bash
+python3 tools/pack.py bots/mad_pod_racing/gold/bot.py
+```
 
 ## Bots
 
-- `bots/mad_pod_racing/gold`: Mad Pod Racing (Gold league).
+- `bots/mad_pod_racing/gold`: Mad Pod Racing — Gold league
 
 

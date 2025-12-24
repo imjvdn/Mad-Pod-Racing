@@ -1,17 +1,24 @@
 # Mad Pod Racing
 
+Two-pod racing AI (contest). This folder tracks separate bots per **league**.
+
 ## Leagues
 
-- `gold/`: current Gold league bot.
+- `gold/`: current Gold league bot
 
-## Files
+## Submitting
 
-- `gold/bot.py`: paste into CodinGame (Python 3).
+- Copy/paste: `gold/bot.py` into CodinGame (Python 3).
+- Optional: print the submission to stdout:
 
-## Notes
+```bash
+python3 ../../tools/pack.py bots/mad_pod_racing/gold/bot.py
+```
 
-- Keeps a stable **racer/blocker** assignment by tracking checkpoint progress per pod.
-- Racer aims with checkpoint “exit” bias + velocity compensation.
-- Blocker targets an intercept point biased toward the enemy leader’s next checkpoint.
+## High-level approach (Gold)
+
+- **Role stability**: keep a consistent racer vs blocker by checkpoint progress + hysteresis.
+- **Racer**: 1-step forward sim over a small candidate set (aim points + thrust/BOOST) to reduce overshoot/stalling.
+- **Blocker**: intercept the enemy leader with a lead target biased toward their next checkpoint.
 
 

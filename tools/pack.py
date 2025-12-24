@@ -7,7 +7,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Print a CodinGame submission file to stdout (simple concatenation helper)."
     )
-    parser.add_argument("file", type=Path, help="Path to a single-file bot (e.g. bots/mad_pod_racing/bot.py)")
+    parser.add_argument(
+        "file",
+        type=Path,
+        help="Path to a single-file bot (e.g. bots/mad_pod_racing/gold/bot.py)",
+    )
     args = parser.parse_args()
 
     src = args.file.read_text(encoding="utf-8")

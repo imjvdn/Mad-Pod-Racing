@@ -1,8 +1,12 @@
-# Mad Pod Racing (Gold)
+# Mad Pod Racing
+
+## Leagues
+
+- `gold/`: current Gold league bot.
 
 ## Files
 
-- `bot.py`: paste into CodinGame (Python 3).
+- `gold/bot.py`: paste into CodinGame (Python 3).
 
 ## Notes
 
